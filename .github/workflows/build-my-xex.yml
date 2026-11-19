@@ -21,8 +21,6 @@ jobs:
           sudo apt-get install -y libzstd1 zlib1g
           sudo apt-get install -y libxml2 || true
           sudo ldconfig
-          ldconfig -p | grep libxml2 || true
-          cat /etc/os-release | head -3
 
       - name: Download toolchain release
         env:
@@ -39,13 +37,6 @@ jobs:
           CLANG=$(find tc \( -type f -o -type l \) -name clang -path '*/bin/*' | head -n1)
           echo "PREFIX=$(cd "$(dirname "$CLANG")/.." && pwd)" >> "$GITHUB_ENV"
 
-      - name: Check missing libraries
-        run: |
-          for b in clang lld-link synthxex; do
-            echo "== $b =="
-            ldd "$PREFIX/bin/$b" | grep 'not found' || echo "all libraries found"
-          done
-
       - name: Build XEX
         run: |
           set -euxo pipefail
@@ -56,16 +47,14 @@ jobs:
           synthxex -i out/app.exe -o out/default.xex
           head -c4 out/default.xex; echo
 
-      - name: List toolchain libraries and headers
+      - name: Collect headers and library info
         if: always()
         run: |
-          mkdir -p out
-          {
-            echo "PREFIX=$PREFIX"
-            find "$PREFIX" -maxdepth 3 -type d | head -100
-            echo "--- libs and headers ---"
-            find "$PREFIX" -type f \( -iname '*xecore*' -o -iname '*xam*' -o -iname '*xboxkrnl*' -o -iname '*.lib' -o -iname 'xe*.h' \) | head -200
-          } > out/toolchain-tree.txt
+          mkdir -p out/headers
+          cp "$PREFIX"/include/xecore/*.h out/headers/ || true
+          ls "$PREFIX/ppc-xbox360/lib" > out/libs-list.txt || true
+          ls "$PREFIX/lib" > out/lib-list.txt || true
+          tar -czf out/xecore-headers.tar.gz -C out headers
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -73,4 +62,6 @@ jobs:
           name: my-xex
           path: |
             out/default.xex
-            out/toolchain-tree.txt
+            out/xecore-headers.tar.gz
+            out/libs-list.txt
+            out/lib-list.txt
