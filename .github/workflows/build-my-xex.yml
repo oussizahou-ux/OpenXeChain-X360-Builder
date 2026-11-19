@@ -37,22 +37,73 @@ jobs:
           CLANG=$(find tc \( -type f -o -type l \) -name clang -path '*/bin/*' | head -n1)
           echo "PREFIX=$(cd "$(dirname "$CLANG")/.." && pwd)" >> "$GITHUB_ENV"
 
-      - name: Build XEX
+      - name: Write test sources
         run: |
-          set -euxo pipefail
-          export PATH="$PREFIX/bin:$PATH"
-          mkdir -p out
+          mkdir -p src out
+          cat > src/a.c <<'EOF'
+          #include <xecore/xboxkrnl_debug.h>
+
+          int _start(void)
           {
-            clang --target=ppc32-xbox360 -c app/main.c -o out/app.o -O2 -ffreestanding -fno-builtin -I"$PREFIX/include"
-            lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/app.exe out/app.o "$PREFIX/lib/xecorelib.a"
-            synthxex -i out/app.exe -o out/default.xex
-            head -c4 out/default.xex; echo
-          } 2>&1 | tee out/build.log
+              DbgPrint("hello from a.xex\n");
+              return 0;
+          }
+          EOF
+          cat > src/b.c <<'EOF'
+          #include <xecore/xboxkrnl_io.h>
+
+          static char msg[] = "Hello from kernel IO\r\n";
+          static char path[] = "\\Device\\Mass0\\hello_b.txt";
+
+          int _start(void)
+          {
+              ANSI_STRING name;
+              OBJECT_ATTRIBUTES oa;
+              IO_STATUS_BLOCK iosb;
+              HANDLE h = 0;
+
+              name.Length = sizeof(path) - 1;
+              name.MaximumLength = sizeof(path);
+              name.Buffer = path;
+              oa.root_directory = 0;
+              oa.name_ptr = &name;
+              oa.attributes = OBJ_CASE_INSENSITIVE;
+              iosb.Status = 0;
+              iosb.Information = 0;
+
+              NTSTATUS st = NtCreateFile(&h, GENERIC_WRITE | SYNCHRONIZE, &oa, &iosb, 0,
+                                         FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
+                                         FILE_OVERWRITE_IF,
+                                         FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
+              if (st == 0)
+              {
+                  NtWriteFile(h, 0, 0, 0, &iosb, msg, sizeof(msg) - 1, 0);
+                  NtClose(h);
+              }
+              return 0;
+          }
+          EOF
+
+      - name: Build XEX variants
+        run: |
+          export PATH="$PREFIX/bin:$PATH"
+          set -x
+          for n in a b c; do
+            case $n in
+              a) S=src/a.c ;;
+              b) S=src/b.c ;;
+              c) S=app/main.c ;;
+            esac
+            clang --target=ppc32-xbox360 -c $S -o out/$n.o -O2 -ffreestanding -fno-builtin -I"$PREFIX/include" || { echo "COMPILE FAILED $n"; continue; }
+            lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/$n.exe out/$n.o "$PREFIX/lib/xecorelib.a" || { echo "LINK FAILED $n"; continue; }
+            synthxex -i out/$n.exe -o out/$n.xex || echo "SYNTHXEX FAILED $n"
+          done 2>&1 | tee out/build.log
+          ls -l out
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: my-xex
           path: |
-            out/default.xex
+            out/*.xex
             out/build.log
