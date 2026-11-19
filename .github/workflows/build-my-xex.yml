@@ -15,6 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install runtime dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y libxml2 libzstd1 zlib1g
+
       - name: Download toolchain release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,11 +36,17 @@ jobs:
           CLANG=$(find tc \( -type f -o -type l \) -name clang -path '*/bin/*' | head -n1)
           echo "PREFIX=$(cd "$(dirname "$CLANG")/.." && pwd)" >> "$GITHUB_ENV"
 
+      - name: Check missing libraries
+        run: |
+          for b in clang lld-link synthxex; do
+            echo "== $b =="
+            ldd "$PREFIX/bin/$b" | grep 'not found' || echo "all libraries found"
+          done
+
       - name: Build XEX
         run: |
           set -euxo pipefail
           export PATH="$PREFIX/bin:$PATH"
-          ldd "$PREFIX/bin/synthxex" || true
           mkdir -p out
           clang --target=ppc32-xbox360 -c app/main.c -o out/app.o -O2 -ffreestanding -fno-builtin
           lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/app.exe out/app.o
@@ -42,7 +54,9 @@ jobs:
           head -c4 out/default.xex; echo
 
       - name: List toolchain libraries and headers
+        if: always()
         run: |
+          mkdir -p out
           {
             echo "PREFIX=$PREFIX"
             find "$PREFIX" -maxdepth 3 -type d | head -100
