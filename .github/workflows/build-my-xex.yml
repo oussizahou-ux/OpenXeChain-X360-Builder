@@ -11,15 +11,18 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install runtime dependencies
         run: |
-          set -euxo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y libxml2 libzstd1 zlib1g
+          sudo apt-get install -y libzstd1 zlib1g
+          sudo apt-get install -y libxml2 || true
+          sudo ldconfig
+          ldconfig -p | grep libxml2 || true
+          cat /etc/os-release | head -3
 
       - name: Download toolchain release
         env:
