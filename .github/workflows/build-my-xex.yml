@@ -1,0 +1,59 @@
+name: Build my XEX
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-my-xex.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download toolchain release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p tc
+          gh release download toolchain-v1 --repo "${{ github.repository }}" --pattern 'openxechain-x360-toolchain.tar.xz' --dir tc
+          tar -xJf tc/openxechain-x360-toolchain.tar.xz -C tc
+
+      - name: Locate toolchain
+        run: |
+          set -euxo pipefail
+          CLANG=$(find tc \( -type f -o -type l \) -name clang -path '*/bin/*' | head -n1)
+          echo "PREFIX=$(cd "$(dirname "$CLANG")/.." && pwd)" >> "$GITHUB_ENV"
+
+      - name: Build XEX
+        run: |
+          set -euxo pipefail
+          export PATH="$PREFIX/bin:$PATH"
+          ldd "$PREFIX/bin/synthxex" || true
+          mkdir -p out
+          clang --target=ppc32-xbox360 -c app/main.c -o out/app.o -O2 -ffreestanding -fno-builtin
+          lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/app.exe out/app.o
+          synthxex -i out/app.exe -o out/default.xex
+          head -c4 out/default.xex; echo
+
+      - name: List toolchain libraries and headers
+        run: |
+          {
+            echo "PREFIX=$PREFIX"
+            find "$PREFIX" -maxdepth 3 -type d | head -100
+            echo "--- libs and headers ---"
+            find "$PREFIX" -type f \( -iname '*xecore*' -o -iname '*xam*' -o -iname '*xboxkrnl*' -o -iname '*.lib' -o -iname 'xe*.h' \) | head -200
+          } > out/toolchain-tree.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: my-xex
+          path: |
+            out/default.xex
+            out/toolchain-tree.txt
