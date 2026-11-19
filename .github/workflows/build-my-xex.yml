@@ -42,19 +42,12 @@ jobs:
           set -euxo pipefail
           export PATH="$PREFIX/bin:$PATH"
           mkdir -p out
-          clang --target=ppc32-xbox360 -c app/main.c -o out/app.o -O2 -ffreestanding -fno-builtin
-          lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/app.exe out/app.o
-          synthxex -i out/app.exe -o out/default.xex
-          head -c4 out/default.xex; echo
-
-      - name: Collect headers and library info
-        if: always()
-        run: |
-          mkdir -p out/headers
-          cp "$PREFIX"/include/xecore/*.h out/headers/ || true
-          ls "$PREFIX/ppc-xbox360/lib" > out/libs-list.txt || true
-          ls "$PREFIX/lib" > out/lib-list.txt || true
-          tar -czf out/xecore-headers.tar.gz -C out headers
+          {
+            clang --target=ppc32-xbox360 -c app/main.c -o out/app.o -O2 -ffreestanding -fno-builtin -I"$PREFIX/include"
+            lld-link /SUBSYSTEM:xbox360 /FIXED /BASE:0x82000000 /ALIGN:0x10000 /ENTRY:_start /OUT:out/app.exe out/app.o "$PREFIX/lib/xecorelib.a"
+            synthxex -i out/app.exe -o out/default.xex
+            head -c4 out/default.xex; echo
+          } 2>&1 | tee out/build.log
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -62,6 +55,4 @@ jobs:
           name: my-xex
           path: |
             out/default.xex
-            out/xecore-headers.tar.gz
-            out/libs-list.txt
-            out/lib-list.txt
+            out/build.log
